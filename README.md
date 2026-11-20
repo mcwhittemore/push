@@ -20,6 +20,7 @@ POST https://<your push>/<service>
 | `400` / `401` | the service rejected it: bad body, token or signature |
 | `404` | no `services/<service>.js` |
 | `405` | not a POST |
+| `413` | too large for the target, such as a GitHub dispatch over ~64 KB |
 | `502` | the target refused it. The sender should retry |
 | `503` | `PUSH_TARGET`, or a variable the service or target needs, isn't set |
 
@@ -52,7 +53,8 @@ jobs:
       - run: echo '${{ toJSON(github.event.client_payload) }}'
 ```
 
-GitHub limits `client_payload` to 10 top-level keys. The envelope uses six.
+GitHub limits `client_payload` to 10 top-level keys, and the envelope uses six. It also caps the payload's size at
+about 64 KB (60 KB goes through, 100 KB doesn't). Anything bigger gets `413`, since a retry won't fix it.
 
 ## Adding a service or target
 

@@ -114,6 +114,12 @@ test("config: a missing target or variable is a 503, a failing target a 502", as
   assert.equal((await post("/inkling", body, auth)).status, 502);
 });
 
+test("github target: a payload GitHub calls too large is a 413, not a retry", async () => {
+  globalThis.fetch = async () => Response.json({ message: "client_payload is too large." }, { status: 422 });
+  const res = await post("/inkling", JSON.stringify(draft), { authorization: "Bearer ink" });
+  assert.equal(res.status, 413);
+});
+
 test("http target: posts the bare envelope with an optional bearer", async () => {
   const e = { PUSH_TARGET: "http", PUSH_URL: "https://hook.example/in", PUSH_TOKEN: "t", INKLING_TOKEN: "ink" };
   assert.equal((await post("/inkling", JSON.stringify(draft), { authorization: "Bearer ink" }, e)).status, 202);
