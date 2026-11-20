@@ -11,6 +11,7 @@ const env = {
   GITHUB_TOKEN: "ghp_test",
   JSON_TOKEN: "ink",
   GRANOLA_SECRET,
+  VERCEL_WEBHOOK_SECRET: "vsecret",
 };
 
 let sent;
@@ -107,6 +108,45 @@ test("granola: the dialog's test event is acknowledged and not sent", async () =
   const res = await post("/granola", body, signed(body));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { ignored: true });
+  assert.equal(sent.length, 0);
+});
+
+const vercelSigned = (body, secret = "vsecret") => ({
+  "x-vercel-signature": createHmac("sha1", secret).update(body).digest("hex"),
+});
+
+test("vercel: a signed event is dispatched about its deployment", async () => {
+  const body = JSON.stringify({
+    id: "evt_1",
+    type: "deployment.error",
+    createdAt: 1763658000000,
+    payload: { deployment: { id: "dpl_1", name: "push" }, project: { id: "prj_1" }, target: "production" },
+  });
+  assert.equal((await post("/vercel", body, vercelSigned(body))).status, 202);
+  const { event_type, client_payload } = sent[0].body;
+  assert.equal(event_type, "push.vercel");
+  assert.equal(client_payload.id, "evt_1");
+  assert.equal(client_payload.type, "com.vercel.deployment.error");
+  assert.equal(client_payload.subject, "dpl_1");
+  assert.equal(client_payload.data.payload.deployment.name, "push");
+});
+
+test("vercel: an event without a deployment is about its project, else itself", async () => {
+  const project = JSON.stringify({ id: "evt_2", type: "project.created", payload: { project: { id: "prj_9" } } });
+  const bare = JSON.stringify({ id: "evt_3", type: "domain.created", payload: {} });
+  await post("/vercel", project, vercelSigned(project));
+  await post("/vercel", bare, vercelSigned(bare));
+  assert.equal(sent[0].body.client_payload.subject, "prj_9");
+  assert.equal(sent[1].body.client_payload.subject, "evt_3");
+});
+
+test("vercel: a wrong or missing signature, or a body without id or type, is refused", async () => {
+  const body = JSON.stringify({ id: "evt_1", type: "deployment.created", payload: {} });
+  assert.equal((await post("/vercel", body, vercelSigned(body, "other"))).status, 401);
+  assert.equal((await post("/vercel", body)).status, 401);
+  assert.equal((await post("/vercel", `${body} `, vercelSigned(body))).status, 401);
+  const noType = JSON.stringify({ id: "evt_1" });
+  assert.equal((await post("/vercel", noType, vercelSigned(noType))).status, 400);
   assert.equal(sent.length, 0);
 });
 

@@ -37,6 +37,7 @@ Everything comes from environment variables, so a fork changes no code. `PUSH_TA
 | --- | --- | --- |
 | `json` | `JSON_TOKEN` | For any sender that can set a header. POST a JSON object to `https://<your push>/json` with `Authorization: Bearer <JSON_TOKEN>`. The optional `type` (default `json`), `id` (becomes `subject`) and `data` (default: the whole body) shape the envelope. The envelope `id` is a hash of the body, so a retry keeps its id |
 | `granola` | `GRANOLA_SECRET` | Granola → Settings → Connectors → Webhooks: paste `https://<your push>/granola`, then set `GRANOLA_SECRET` to the `whsec_` secret it shows and redeploy. Events carry only `note_id`, so fetch the note with a Granola API key |
+| `vercel` | `VERCEL_WEBHOOK_SECRET` | Vercel → Team Settings → Webhooks: add `https://<your push>/vercel` and pick the events you want. Then set `VERCEL_WEBHOOK_SECRET` to the secret it shows and redeploy. The envelope's `type` is `com.vercel.<event>`, and its `subject` is the deployment, else the project |
 
 A service whose variable isn't set answers `503`, so you can deploy with only the services you use.
 
@@ -45,7 +46,7 @@ A service whose variable isn't set answers `503`, so you can deploy with only th
 ```yaml
 on:
   repository_dispatch:
-    types: [push.json, push.granola]
+    types: [push.json, push.granola, push.vercel]
 jobs:
   land:
     runs-on: ubuntu-latest
