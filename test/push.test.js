@@ -9,7 +9,7 @@ const env = {
   PUSH_TARGET: "github",
   GITHUB_REPO: "someone/somewhere",
   GITHUB_TOKEN: "ghp_test",
-  INKLING_TOKEN: "ink",
+  JSON_TOKEN: "ink",
   GRANOLA_SECRET,
 };
 
@@ -31,29 +31,45 @@ const post = (path, body, headers = {}, e = env) =>
 
 const draft = { type: "draft.saved", id: "d1", data: { title: "Hi", text: "hello", saved_at: "2026-11-20T16:59:00Z" } };
 
-test("inkling: a good draft is dispatched with its service", async () => {
-  const res = await post("/inkling", JSON.stringify(draft), { authorization: "Bearer ink" });
+test("json: any JSON object is dispatched, keyed by a hash of its body", async () => {
+  const body = JSON.stringify(draft);
+  const res = await post("/json", body, { authorization: "Bearer ink" });
   assert.equal(res.status, 202);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].url, "https://api.github.com/repos/someone/somewhere/dispatches");
   assert.equal(sent[0].headers.authorization, "Bearer ghp_test");
-  assert.deepEqual(sent[0].body, {
-    event_type: "push.inkling",
-    client_payload: {
-      service: "inkling",
-      id: "d1:2026-11-20T16:59:00Z",
-      type: "draft.saved",
-      subject: "d1",
-      data: draft.data,
-      received_at: NOW.toISOString(),
-    },
+  const { event_type, client_payload } = sent[0].body;
+  assert.equal(event_type, "push.json");
+  assert.match(client_payload.id, /^[0-9a-f]{32}$/);
+  assert.deepEqual(client_payload, {
+    service: "json",
+    id: client_payload.id,
+    type: "draft.saved",
+    subject: "d1",
+    data: draft.data,
+    received_at: NOW.toISOString(),
   });
+  // A retry keeps its id; a new revision gets a new one.
+  await post("/json", body, { authorization: "Bearer ink" });
+  const revised = JSON.stringify({ ...draft, data: { ...draft.data, text: "hello again" } });
+  await post("/json", revised, { authorization: "Bearer ink" });
+  assert.equal(sent[1].body.client_payload.id, client_payload.id);
+  assert.notEqual(sent[2].body.client_payload.id, client_payload.id);
 });
 
-test("inkling: a bad token or body is refused and nothing is sent", async () => {
-  assert.equal((await post("/inkling", JSON.stringify(draft), { authorization: "Bearer nope" })).status, 401);
-  assert.equal((await post("/inkling", "{", { authorization: "Bearer ink" })).status, 400);
-  assert.equal((await post("/inkling", JSON.stringify({ ...draft, data: {} }), { authorization: "Bearer ink" })).status, 400);
+test("json: a bare object gets type json, no subject, and the body as data", async () => {
+  await post("/json", JSON.stringify({ hello: "world" }), { authorization: "Bearer ink" });
+  const { client_payload } = sent[0].body;
+  assert.equal(client_payload.type, "json");
+  assert.equal("subject" in client_payload, false);
+  assert.deepEqual(client_payload.data, { hello: "world" });
+});
+
+test("json: a bad token or body is refused and nothing is sent", async () => {
+  assert.equal((await post("/json", JSON.stringify(draft), { authorization: "Bearer nope" })).status, 401);
+  assert.equal((await post("/json", "{", { authorization: "Bearer ink" })).status, 400);
+  assert.equal((await post("/json", "[1]", { authorization: "Bearer ink" })).status, 400);
+  assert.equal((await post("/json", JSON.stringify({ type: 3 }), { authorization: "Bearer ink" })).status, 400);
   assert.equal(sent.length, 0);
 });
 
@@ -100,30 +116,30 @@ test("routing: unknown or unsafe services 404, GET says how to use it", async ()
   assert.equal((await post("/api?service=../lib/push", "{}")).status, 404);
   const root = await handle(new Request("https://push.example/"), env, NOW);
   assert.equal(root.status, 200);
-  assert.equal((await handle(new Request("https://push.example/inkling"), env, NOW)).status, 405);
+  assert.equal((await handle(new Request("https://push.example/json"), env, NOW)).status, 405);
 });
 
 test("config: a missing target or variable is a 503, a failing target a 502", async () => {
   const body = JSON.stringify(draft);
   const auth = { authorization: "Bearer ink" };
-  assert.equal((await post("/inkling", body, auth, { ...env, PUSH_TARGET: undefined })).status, 503);
-  const res = await post("/inkling", body, auth, { ...env, GITHUB_TOKEN: "" });
+  assert.equal((await post("/json", body, auth, { ...env, PUSH_TARGET: undefined })).status, 503);
+  const res = await post("/json", body, auth, { ...env, GITHUB_TOKEN: "" });
   assert.equal(res.status, 503);
   assert.match((await res.json()).error, /GITHUB_TOKEN/);
   targetStatus = 422;
-  assert.equal((await post("/inkling", body, auth)).status, 502);
+  assert.equal((await post("/json", body, auth)).status, 502);
 });
 
 test("github target: a payload GitHub calls too large is a 413, not a retry", async () => {
   globalThis.fetch = async () => Response.json({ message: "client_payload is too large." }, { status: 422 });
-  const res = await post("/inkling", JSON.stringify(draft), { authorization: "Bearer ink" });
+  const res = await post("/json", JSON.stringify(draft), { authorization: "Bearer ink" });
   assert.equal(res.status, 413);
 });
 
 test("http target: posts the bare envelope with an optional bearer", async () => {
-  const e = { PUSH_TARGET: "http", PUSH_URL: "https://hook.example/in", PUSH_TOKEN: "t", INKLING_TOKEN: "ink" };
-  assert.equal((await post("/inkling", JSON.stringify(draft), { authorization: "Bearer ink" }, e)).status, 202);
+  const e = { PUSH_TARGET: "http", PUSH_URL: "https://hook.example/in", PUSH_TOKEN: "t", JSON_TOKEN: "ink" };
+  assert.equal((await post("/json", JSON.stringify(draft), { authorization: "Bearer ink" }, e)).status, 202);
   assert.equal(sent[0].url, "https://hook.example/in");
   assert.equal(sent[0].headers.authorization, "Bearer t");
-  assert.equal(sent[0].body.service, "inkling");
+  assert.equal(sent[0].body.service, "json");
 });
